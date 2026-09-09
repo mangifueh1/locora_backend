@@ -12,13 +12,13 @@ async function businessAuth(req, res, next) {
         return res.status(401).json({error: 'Missing or malformed Authorization.'});
     }
 
-    const {row} = await pool.query('SELECT * FROM businesses id = $1', [businessId]);
-    const business = row[0];
+    const { rows } = await pool.query('SELECT * FROM businesses WHERE id = $1', [businessId]);
+    const business = rows[0];
     if (!business) {
         return res.status(401).json({error: 'Unknown Business'});
     }
 
-    const valid = bcrypt.compare(rawKey, business.api_key_hash);
+    const valid = await bcrypt.compare(rawKey, business.api_key_hash);
     if (!valid) return res.status(401).json({error: 'Invalid API key'})
     
     req.business = business;
