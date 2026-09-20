@@ -87,10 +87,35 @@ router.post('/login', async (req, res) => {
   });
 });
 
+// Deliveries this driver can claim from businesses they belong to.
+router.get('/me/available-deliveries', driverAuth, async (req, res) => {
+  const { rows: activeRows } = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM deliveries
+     WHERE driver_id = $1 AND status IN ('assigned', 'in_progress')`,
+    [req.driver.id]
+  );
+  const { rows } = await pool.query(
+    `SELECT d.id, d.order_id, d.status, d.customer_lat, d.customer_lng,
+            b.id AS business_id, b.name AS business_name, d.created_at
+     FROM deliveries d
+     JOIN driver_businesses db ON db.business_id = d.business_id
+     JOIN businesses b ON b.id = d.business_id
+     WHERE db.driver_id = $1 AND d.status = 'pending' AND d.driver_id IS NULL
+     ORDER BY d.created_at ASC`,
+    [req.driver.id]
+  );
+  res.json({
+    active_delivery_count: activeRows[0].count,
+    available_slots: Math.max(0, 2 - activeRows[0].count),
+    deliveries: rows
+  });
+});
+
 // The driver's own dashboard feed — everything assigned to them, newest first.
 router.get('/me/deliveries', driverAuth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT d.id, d.order_id, d.status, d.customer_lat, d.customer_lng,
+            d.driver_lat, d.driver_lng,
             b.name AS business_name, d.created_at
      FROM deliveries d
      JOIN businesses b ON b.id = d.business_id

@@ -1,12 +1,16 @@
 const express = require('express');
 const pool = require('../db/pool');
 const businessAuth = require('../middleware/businessAuth');
-const businessAuthEither = require('../middleware/businessAuthEither');
 const driverAuth = require('../middleware/driverAuth');
 const { normalizePhone } = require('../utils/phone');
 const { signToken, verifyToken } = require('../utils/tokens');
 
 const router = express.Router();
+const publicAppUrl = () => process.env.PUBLIC_APP_URL || 'https://yourapp.com';
+
+function validCoordinates(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
 
 // Business kicks off a delivery. Looks up the customer GLOBALLY by phone —
 // if any business has ever saved this phone's location, it's reused here too.
@@ -52,7 +56,7 @@ router.post('/', businessAuth, async (req, res) => {
     return res.status(201).json({
       requires_location: false,
       delivery_id: rows[0].id,
-      tracking_link: `${process.env.PUBLIC_APP_URL || 'https://yourapp.com'}/track/${trackingToken}`
+      tracking_link: `${publicAppUrl()}/track/${trackingToken}`
     });
   }
 
@@ -64,12 +68,14 @@ router.post('/', businessAuth, async (req, res) => {
   );
   const deliveryId = rows[0].id;
   const pickerToken = signToken({ deliveryId, type: 'picker' }, '30m');
+  const trackingToken = signToken({ deliveryId, type: 'tracking' }, '7d');
   await pool.query('UPDATE deliveries SET picker_token = $1 WHERE id = $2', [pickerToken, deliveryId]);
 
   res.status(201).json({
     requires_location: true,
     delivery_id: deliveryId,
-    picker_url: `${process.env.PUBLIC_APP_URL || 'https://yourapp.com'}/pick/${pickerToken}`
+    picker_url: `${publicAppUrl()}/pick/${pickerToken}`,
+    tracking_link: `${publicAppUrl()}/track/${trackingToken}`
   });
 });
 
@@ -80,8 +86,8 @@ router.post('/by-token/:token/location', async (req, res) => {
     return res.status(401).json({ error: 'Invalid or expired picker link' });
   }
   const { lat, lng } = req.body;
-  if (typeof lat !== 'number' || typeof lng !== 'number') {
-    return res.status(400).json({ error: 'lat and lng must be numbers' });
+  if (!validCoordinates(lat, lng)) {
+    return res.status(400).json({ error: 'lat and lng must be valid coordinates' });
   }
 
   const { rows } = await pool.query('SELECT * FROM deliveries WHERE id = $1', [payload.deliveryId]);
@@ -102,32 +108,117 @@ router.post('/by-token/:token/location', async (req, res) => {
   const trackingToken = signToken({ deliveryId: delivery.id, type: 'tracking' }, '7d');
   res.json({
     status: 'success',
-    tracking_link: `${process.env.PUBLIC_APP_URL || 'https://yourapp.com'}/track/${trackingToken}`
+    tracking_link: `${publicAppUrl()}/track/${trackingToken}`
   });
 });
 
-// Business assigns a delivery to one of ITS drivers.
-// Accepts either the API key (business's own backend) OR a dashboard session
-// (a human clicking "assign" in the UI) — see businessAuthEither.
-router.post('/:id/assign', businessAuthEither, async (req, res) => {
-  const { driver_id } = req.body;
-  if (!driver_id) return res.status(400).json({ error: 'driver_id is required' });
-
-  const { rows: membership } = await pool.query(
-    'SELECT 1 FROM driver_businesses WHERE driver_id = $1 AND business_id = $2',
-    [driver_id, req.business.id]
-  );
-  if (!membership[0]) {
-    return res.status(400).json({ error: 'That driver does not belong to your business' });
+// Public tracking data for the customer tracking page.
+router.get('/by-token/:token', async (req, res) => {
+  const payload = verifyToken(req.params.token);
+  if (!payload || payload.type !== 'tracking') {
+    return res.status(401).json({ error: 'Invalid or expired tracking link' });
   }
 
   const { rows } = await pool.query(
-    `UPDATE deliveries SET driver_id = $1, status = 'assigned', updated_at = now()
-     WHERE id = $2 AND business_id = $3 RETURNING *`,
-    [driver_id, req.params.id, req.business.id]
+    `SELECT d.id, d.order_id, d.status, d.customer_lat, d.customer_lng,
+            d.driver_id, d.driver_lat, d.driver_lng, d.updated_at,
+            b.name AS business_name
+     FROM deliveries d
+     JOIN businesses b ON b.id = d.business_id
+     WHERE d.id = $1`,
+    [payload.deliveryId]
   );
-  if (!rows[0]) return res.status(404).json({ error: 'Delivery not found' });
+  const delivery = rows[0];
+  if (!delivery) return res.status(404).json({ error: 'Delivery not found' });
 
+  res.json({
+    delivery: {
+      ...delivery,
+      driver: delivery.driver_id
+        ? { id: delivery.driver_id, lat: delivery.driver_lat, lng: delivery.driver_lng }
+        : null,
+      assignment: delivery.driver_id ? 'assigned' : 'still_to_be_assigned'
+    }
+  });
+});
+
+// Drivers can claim only deliveries for businesses they belong to, with two active deliveries max.
+router.post('/:id/claim', driverAuth, async (req, res) => {
+  const { lat, lng } = req.body;
+  if (!validCoordinates(lat, lng)) {
+    return res.status(400).json({ error: 'lat and lng must be valid coordinates' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: driverRows } = await client.query(
+      'SELECT id FROM drivers WHERE id = $1 FOR UPDATE',
+      [req.driver.id]
+    );
+    if (!driverRows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(401).json({ error: 'Driver not found' });
+    }
+
+    const { rows: deliveryRows } = await client.query(
+      `SELECT d.*
+       FROM deliveries d
+       JOIN driver_businesses db ON db.business_id = d.business_id
+       WHERE d.id = $1 AND db.driver_id = $2
+       FOR UPDATE OF d`,
+      [req.params.id, req.driver.id]
+    );
+    const delivery = deliveryRows[0];
+    if (!delivery) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Delivery not found for one of your businesses' });
+    }
+    if (delivery.status !== 'pending' || delivery.driver_id) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Delivery is no longer available' });
+    }
+
+    const { rows: activeRows } = await client.query(
+      `SELECT COUNT(*)::int AS count FROM deliveries
+       WHERE driver_id = $1 AND status IN ('assigned', 'in_progress')`,
+      [req.driver.id]
+    );
+    if (activeRows[0].count >= 2) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'You can have at most 2 active deliveries' });
+    }
+
+    const { rows } = await client.query(
+      `UPDATE deliveries
+       SET driver_id = $1, driver_lat = $2, driver_lng = $3,
+           status = 'assigned', updated_at = now()
+       WHERE id = $4
+       RETURNING *`,
+      [req.driver.id, lat, lng, req.params.id]
+    );
+    await client.query('COMMIT');
+    res.status(200).json({ delivery: rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/:id/location', driverAuth, async (req, res) => {
+  const { lat, lng } = req.body;
+  if (!validCoordinates(lat, lng)) {
+    return res.status(400).json({ error: 'lat and lng must be valid coordinates' });
+  }
+  const { rows } = await pool.query(
+    `UPDATE deliveries SET driver_lat = $1, driver_lng = $2, updated_at = now()
+     WHERE id = $3 AND driver_id = $4 RETURNING *`,
+    [lat, lng, req.params.id, req.driver.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'Delivery not found or not assigned to you' });
   res.json({ delivery: rows[0] });
 });
 

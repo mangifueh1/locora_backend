@@ -56,6 +56,8 @@ CREATE TABLE deliveries (
   customer_lat DOUBLE PRECISION,       -- snapshot at time of THIS order
   customer_lng DOUBLE PRECISION,       -- (a later address correction never rewrites this)
   driver_id UUID REFERENCES drivers(id),
+  driver_lat DOUBLE PRECISION,
+  driver_lng DOUBLE PRECISION,
   status TEXT NOT NULL DEFAULT 'pending',  -- pending | assigned | in_progress | delivered
   picker_token TEXT,                   -- signed token for the location-picker link, if needed
   created_at TIMESTAMPTZ DEFAULT now(),

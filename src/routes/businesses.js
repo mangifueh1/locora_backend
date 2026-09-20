@@ -84,8 +84,7 @@ router.delete('/me/drivers/:driverId', businessSessionAuth, async (req, res) => 
   res.json({ status: 'removed', driver_id: rows[0].driver_id });
 });
 
-// List this business's deliveries — used by the dashboard to populate the
-// "assign a driver" screen. Filter to unassigned/pending by default.
+// List this business's deliveries. Drivers claim pending deliveries themselves.
 router.get('/me/deliveries', businessSessionAuth, async (req, res) => {
   const status = req.query.status; // optional: ?status=pending
   const { rows } = await pool.query(
