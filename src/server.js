@@ -8,6 +8,8 @@ const businessesRoutes = require('./routes/businesses');
 const driversRoutes = require('./routes/drivers');
 const deliveriesRoutes = require('./routes/deliveries');
 const customersRoutes = require('./routes/customers');
+const errorHandler = require('./middleware/errorHandler');
+const AppResponse = require('./utils/AppResponse');
 
 const app = express();
 app.use(cors());
@@ -18,7 +20,13 @@ app.use('/api/v1/drivers', driversRoutes);
 app.use('/api/v1/deliveries', deliveriesRoutes);
 app.use('/api/v1/customers', customersRoutes);
 
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '1.0.0' }));
+
+app.use((req, res, next) => {
+  next(new AppResponse(`Route not found: ${req.method} ${req.originalUrl}`, 404));
+});
+
+app.use(errorHandler);
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });

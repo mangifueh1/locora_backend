@@ -1,6 +1,7 @@
 
 const {verifyToken} = require('../utils/tokens');
 const pool = require('../db/pool');
+const AppResponse = require('../utils/AppResponse');
 
 async function driverAuth(req, res, next) {
     const header = req.headers.authorization || '';
@@ -8,11 +9,11 @@ async function driverAuth(req, res, next) {
     const payload = verifyToken(token);
 
     if (!payload || payload.type !== 'driver') {
-        return res.status(401).json({error: "Invalid or expired driver session"});
+        return next(new AppResponse('Invalid or expired driver session', 401));
     }
 
     const {rows} = await pool.query('SELECT id, name, phone FROM drivers WHERE id = $1', [payload.driverId]);
-    if (!rows[0]) return res.status(401).json({error: "Driver not found"});
+    if (!rows[0]) return next(new AppResponse('Driver not found', 401));
 
     req.driver = rows[0];
     next();

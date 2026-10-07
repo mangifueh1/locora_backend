@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const pool = require('../db/pool');
+const AppResponse = require('../utils/AppResponse');
 const { signToken } = require('../utils/tokens');
 const businessSessionAuth = require('../middleware/businessSessionAuth');
 
@@ -9,10 +10,10 @@ const router = express.Router();
 
 // Registration now sets BOTH a dashboard password and issues an API key.
 // name is unique — it doubles as the login identifier.
-router.post('/register', async (req, res) => {
+router.post('/register', async (req, res, next) => {
   const { name, password, webhook_url } = req.body;
   if (!name || !password) {
-    return res.status(400).json({ error: 'name and password are required' });
+    return next(new AppResponse('name and password are required', 400));
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
@@ -35,23 +36,23 @@ router.post('/register', async (req, res) => {
     });
   } catch (err) {
     if (err.code === '23505') {
-      return res.status(409).json({ error: 'A business with this name already exists' });
+      return next(new AppResponse('A business with this name already exists', 409));
     }
-    throw err;
+    return next(err);
   }
 });
 
 // Dashboard login — separate credential from the API key entirely.
-router.post('/login', async (req, res) => {
+router.post('/login', async (req, res, next) => {
   const { name, password } = req.body;
-  if (!name || !password) return res.status(400).json({ error: 'name and password are required' });
+  if (!name || !password) return next(new AppResponse('name and password are required', 400));
 
   const { rows } = await pool.query('SELECT * FROM businesses WHERE name = $1', [name]);
   const business = rows[0];
-  if (!business) return res.status(401).json({ error: 'Invalid name or password' });
+  if (!business) return next(new AppResponse('Invalid name or password', 401));
 
   const valid = await bcrypt.compare(password, business.password_hash);
-  if (!valid) return res.status(401).json({ error: 'Invalid name or password' });
+  if (!valid) return next(new AppResponse('Invalid name or password', 401));
 
   const token = signToken({ businessId: business.id, type: 'business' }, '7d');
   res.json({ business: { id: business.id, name: business.name }, token });
@@ -75,12 +76,12 @@ router.get('/me/drivers', businessSessionAuth, async (req, res) => {
 // Remove a driver from THIS business only — does not delete the driver's account,
 // since they may belong to other businesses too. Any of the business's deliveries
 // still assigned to them are left as-is; unassign those separately if needed.
-router.delete('/me/drivers/:driverId', businessSessionAuth, async (req, res) => {
+router.delete('/me/drivers/:driverId', businessSessionAuth, async (req, res, next) => {
   const { rows } = await pool.query(
     `DELETE FROM driver_businesses WHERE business_id = $1 AND driver_id = $2 RETURNING driver_id`,
     [req.business.id, req.params.driverId]
   );
-  if (!rows[0]) return res.status(404).json({ error: 'That driver is not registered with your business' });
+  if (!rows[0]) return next(new AppResponse('That driver is not registered with your business', 404));
   res.json({ status: 'removed', driver_id: rows[0].driver_id });
 });
 

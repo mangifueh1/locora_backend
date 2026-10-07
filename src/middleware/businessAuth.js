@@ -1,6 +1,7 @@
 
 const bcrypt = require('bcrypt');
 const pool = require('../db/pool');
+const AppResponse = require('../utils/AppResponse');
 
 async function businessAuth(req, res, next) {
 
@@ -9,17 +10,17 @@ async function businessAuth(req, res, next) {
     const [businessId, rawKey] = token.split('.');
 
     if (!businessId || !rawKey) {
-        return res.status(401).json({error: 'Missing or malformed Authorization.'});
+        return next(new AppResponse('Missing or malformed Authorization.', 401));
     }
 
     const { rows } = await pool.query('SELECT * FROM businesses WHERE id = $1', [businessId]);
     const business = rows[0];
     if (!business) {
-        return res.status(401).json({error: 'Unknown Business'});
+        return next(new AppResponse('Unknown Business', 401));
     }
 
     const valid = await bcrypt.compare(rawKey, business.api_key_hash);
-    if (!valid) return res.status(401).json({error: 'Invalid API key'})
+    if (!valid) return next(new AppResponse('Invalid API key', 401));
     
     req.business = business;
     next();
