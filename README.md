@@ -70,7 +70,7 @@ requires it.
 4. Choose a region. Use the same region for the web service below.
 5. Choose the plan and storage appropriate for your workload, then create it.
 6. Open the database after it is available. Keep its **Internal Database URL**
-	available; it will become the web service's `DATABASE_URL`.
+   available; it will become the web service's `DATABASE_URL`.
 
 Use the internal URL when the web service and database are both on Render. It
 keeps traffic inside Render's private network. Do not commit this URL or put
@@ -83,7 +83,7 @@ Push the repository to GitHub, GitLab, or Bitbucket, then:
 1. Select **New +** -> **Web Service**.
 2. Connect the repository containing this backend.
 3. Set **Root Directory** to the repository root (leave it blank if this
-	repository is the root of the connected repository).
+   repository is the root of the connected repository).
 4. Choose **Runtime: Node**.
 5. Set **Build Command** to `npm install`.
 6. Set **Start Command** to `npm start`.
@@ -98,12 +98,13 @@ development file watcher. Render should run the existing `npm start` script.
 In the web service, open **Environment** -> **Add Environment Variable** and
 add these values:
 
-| Key | Value | Required |
-|---|---|---|
-| `DATABASE_URL` | Copy the PostgreSQL service's **Internal Database URL** | Yes |
-| `JWT_SECRET` | A new long random secret, different from local development | Yes |
-| `PUBLIC_APP_URL` | The public URL of the frontend that serves `/pick/...` and `/track/...` | Yes for correct links |
-| `NODE_ENV` | `production` | Recommended |
+| Key                | Value                                                         | Required                                       |
+| ------------------ | ------------------------------------------------------------- | ---------------------------------------------- |
+| `DATABASE_URL`     | Copy the PostgreSQL service's **Internal Database URL**       | Yes                                            |
+| `JWT_SECRET`       | A new long random secret, different from local development    | Yes                                            |
+| `SENDGRID_API_KEY` | SendGrid API key with Mail Send permission                    | Yes for password resets and email verification |
+| `MAIL_FROM`        | Verified SendGrid sender address, e.g. `no-reply@example.com` | Yes for password resets and email verification |
+| `NODE_ENV`         | `production`                                                  | Recommended                                    |
 
 Do not add `PORT` manually. Render provides `PORT`, and `src/server.js` already
 listens on `process.env.PORT`. Do not put quotes around values in Render's
@@ -115,10 +116,9 @@ Generate a JWT secret locally with Node if needed:
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
-`PUBLIC_APP_URL` must be the frontend origin, for example
-`https://your-frontend.onrender.com`, not the backend URL, unless the frontend
-is hosted by this same service. The backend uses it to build the `tracking_link`
-and `picker_url` returned by `POST /api/v1/deliveries`.
+Public links use `http://localhost:55990` when `NODE_ENV=development` and
+`https://www.locora.site` in every other environment. No public URL environment
+variable is needed.
 
 For local development, keep using a local `.env` file with values like these,
 but never commit that file:
@@ -128,7 +128,8 @@ PORT=4000
 DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/locora_db
 JWT_SECRET=local-only-secret
 NODE_ENV=development
-PUBLIC_APP_URL=http://localhost:3000
+SENDGRID_API_KEY=your-sendgrid-api-key
+MAIL_FROM=no-reply@example.com
 ```
 
 The deployed service does not need a `.env` file. `dotenv` loads the file when
@@ -163,6 +164,33 @@ The migration is safe to run more than once because it uses `IF NOT EXISTS`.
 There is currently no migration table or automatic migration command, so run
 future SQL migrations manually before deploying code that depends on them.
 
+For an existing database created before business email was added, apply the
+email migrations in order after the schema is present:
+
+```bash
+psql "<EXTERNAL_DATABASE_URL>" -f src/db/migrations/002_adding_business_email.sql
+psql "<EXTERNAL_DATABASE_URL>" -f src/db/migrations/003_making_email_required.sql
+psql "<EXTERNAL_DATABASE_URL>" -f src/db/migrations/004_business_password_reset.sql
+```
+
+The second migration assigns generated placeholder addresses to existing
+businesses without an email before making the column required. New databases
+already get the required unique email column from `schema.sql`.
+
+Apply `004_business_password_reset.sql` to existing databases before deploying
+the password-reset endpoints. New databases already include those fields in
+`schema.sql`.
+
+Apply the verification migration to existing databases before deploying the
+email-verification endpoints:
+
+```bash
+psql "<EXTERNAL_DATABASE_URL>" -f src/db/migrations/005_business_email_verification.sql
+```
+
+Existing businesses remain verified; new registrations must verify their
+email before accessing the dashboard or using a business API key.
+
 ### 5. Configure the health check and deploy
 
 In the web service settings, set **Health Check Path** to:
@@ -174,7 +202,7 @@ In the web service settings, set **Health Check Path** to:
 Deploy the service. A successful health check returns:
 
 ```json
-{"status":"ok"}
+{ "status": "ok" }
 ```
 
 The backend URL will look like `https://<service-name>.onrender.com`. The API
@@ -198,19 +226,21 @@ curl https://<service-name>.onrender.com/health
 
 Then use Postman or your frontend to verify, in order:
 
-1. Register a business through `POST /api/v1/businesses/register`.
+1. Register a business through `POST /api/v1/businesses/register` and verify
+   its email using the link and `POST /api/v1/businesses/verify-email`.
 2. Log in and confirm the returned JWT can authenticate a protected route.
-3. Create a delivery through `POST /api/v1/deliveries`.
-4. Confirm its `tracking_link` and, when needed, `picker_url` use
-	`PUBLIC_APP_URL` rather than a placeholder domain.
+3. Create a delivery through `POST /api/v1/deliveries` using the returned API
+   key.
+4. Confirm its `tracking_link` and, when needed, `picker_url` use the expected
+   frontend origin for the current `NODE_ENV`.
 5. Open the public tracking endpoint from the returned token:
-	`GET /api/v1/deliveries/by-token/:token`.
+   `GET /api/v1/deliveries/by-token/:token`.
 6. Connect the frontend Socket.IO client to the backend origin and verify
-	delivery-room location updates.
+   delivery-room location updates.
 
 Check **Logs** in Render if startup fails. The most common causes for this
-repository are a missing `DATABASE_URL`, a missing `JWT_SECRET`, an uninitialized
-database schema, or a `PUBLIC_APP_URL` that points at the wrong frontend.
+repository are a missing `DATABASE_URL`, a missing `JWT_SECRET`, or an
+uninitialized database schema.
 
 ### Render production notes
 

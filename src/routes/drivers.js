@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const pool = require('../db/pool');
+const AppResponse = require('../utils/AppResponse');
 const { normalizePhone } = require('../utils/phone');
 const { signToken } = require('../utils/tokens');
 const driverAuth = require('../middleware/driverAuth');
@@ -9,18 +10,18 @@ const router = express.Router();
 
 // Sign up with name, phone, password, and one or more business_ids.
 // No approval step — valid business_ids become active memberships immediately.
-router.post('/register', async (req, res) => {
+router.post('/register', async (req, res, next) => {
   const { name, phone, password, business_ids } = req.body;
 
   if (!name || !phone || !password) {
-    return res.status(400).json({ error: 'name, phone, and password are required' });
+    return next(new AppResponse('name, phone, and password are required', 400));
   }
   if (!Array.isArray(business_ids) || business_ids.length === 0) {
-    return res.status(400).json({ error: 'business_ids must be a non-empty array' });
+    return next(new AppResponse('business_ids must be a non-empty array', 400));
   }
 
   const normalizedPhone = normalizePhone(phone);
-  if (!normalizedPhone) return res.status(400).json({ error: 'Invalid phone number' });
+  if (!normalizedPhone) return next(new AppResponse('Invalid phone number', 400));
 
   // Validate every business_id exists before creating anything.
   const { rows: found } = await pool.query(
@@ -28,7 +29,7 @@ router.post('/register', async (req, res) => {
     [business_ids]
   );
   if (found.length !== business_ids.length) {
-    return res.status(400).json({ error: 'One or more business_ids do not exist' });
+    return next(new AppResponse('One or more business_ids do not exist', 400));
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
@@ -58,27 +59,27 @@ router.post('/register', async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') {
-      return res.status(409).json({ error: 'A driver with this phone number already exists' });
+      return next(new AppResponse('A driver with this phone number already exists', 409));
     }
-    throw err;
+    return next(err);
   } finally {
     client.release();
   }
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', async (req, res, next) => {
   const { phone, password } = req.body;
   const normalizedPhone = normalizePhone(phone);
   if (!normalizedPhone || !password) {
-    return res.status(400).json({ error: 'phone and password are required' });
+    return next(new AppResponse('phone and password are required', 400));
   }
 
   const { rows } = await pool.query('SELECT * FROM drivers WHERE phone = $1', [normalizedPhone]);
   const driver = rows[0];
-  if (!driver) return res.status(401).json({ error: 'Invalid phone or password' });
+  if (!driver) return next(new AppResponse('Invalid phone or password', 401));
 
   const valid = await bcrypt.compare(password, driver.password_hash);
-  if (!valid) return res.status(401).json({ error: 'Invalid phone or password' });
+  if (!valid) return next(new AppResponse('Invalid phone or password', 401));
 
   const token = signToken({ driverId: driver.id, type: 'driver' }, '7d');
   res.json({

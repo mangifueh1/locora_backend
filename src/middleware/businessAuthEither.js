@@ -1,5 +1,6 @@
 const bcrypt = require('bcrypt');
 const pool = require('../db/pool');
+const AppResponse = require('../utils/AppResponse');
 const { verifyToken } = require('../utils/tokens');
 
 // Accepts either an API key (business_id.raw_key) or a dashboard session JWT.
@@ -28,7 +29,7 @@ async function businessAuthEither(req, res, next) {
     }
   }
 
-  return res.status(401).json({ error: 'Invalid business credentials' });
+  return next(new AppResponse('Invalid business credentials', 401));
 }
 
 module.exports = businessAuthEither;
