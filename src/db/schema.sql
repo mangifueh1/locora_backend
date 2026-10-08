@@ -2,7 +2,13 @@
 CREATE TABLE businesses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT UNIQUE NOT NULL,           -- unique: it's now also the login identifier
+  email TEXT NOT NULL UNIQUE,
+  email_verified BOOLEAN NOT NULL DEFAULT TRUE,
+  email_verification_token_hash TEXT,
+  email_verification_expires_at TIMESTAMPTZ,
   password_hash TEXT NOT NULL,         -- dashboard login (separate from the API key)
+  password_reset_token_hash TEXT,
+  password_reset_expires_at TIMESTAMPTZ,
   api_key_hash TEXT NOT NULL,
   webhook_url TEXT,
   created_at TIMESTAMPTZ DEFAULT now()

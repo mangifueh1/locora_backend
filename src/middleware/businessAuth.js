@@ -21,6 +21,9 @@ async function businessAuth(req, res, next) {
 
     const valid = await bcrypt.compare(rawKey, business.api_key_hash);
     if (!valid) return next(new AppResponse('Invalid API key', 401));
+    if (!business.email_verified) {
+        return next(new AppResponse('Verify your email before using this API key', 403));
+    }
     
     req.business = business;
     next();

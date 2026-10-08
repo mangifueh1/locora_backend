@@ -5,9 +5,9 @@ const driverAuth = require('../middleware/driverAuth');
 const AppResponse = require('../utils/AppResponse');
 const { normalizePhone } = require('../utils/phone');
 const { signToken, verifyToken } = require('../utils/tokens');
+const { getPublicAppUrl } = require('../utils/publicAppUrl');
 
 const router = express.Router();
-const publicAppUrl = () => process.env.PUBLIC_APP_URL || 'http://localhost:55990';
 
 function validCoordinates(lat, lng) {
   return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
@@ -57,7 +57,7 @@ router.post('/', businessAuth, async (req, res, next) => {
     return res.status(201).json({
       requires_location: false,
       delivery_id: rows[0].id,
-      tracking_link: `${publicAppUrl()}/track/${trackingToken}`
+      tracking_link: `${getPublicAppUrl()}/track/${trackingToken}`
     });
   }
 
@@ -75,8 +75,8 @@ router.post('/', businessAuth, async (req, res, next) => {
   res.status(201).json({
     requires_location: true,
     delivery_id: deliveryId,
-    picker_url: `${publicAppUrl()}/pick/${pickerToken}`,
-    tracking_link: `${publicAppUrl()}/track/${trackingToken}`
+    picker_url: `${getPublicAppUrl()}/pick/${pickerToken}`,
+    tracking_link: `${getPublicAppUrl()}/track/${trackingToken}`
   });
 });
 
@@ -109,7 +109,7 @@ router.post('/by-token/:token/location', async (req, res, next) => {
   const trackingToken = signToken({ deliveryId: delivery.id, type: 'tracking' }, '7d');
   res.json({
     status: 'success',
-    tracking_link: `${publicAppUrl()}/track/${trackingToken}`
+    tracking_link: `${getPublicAppUrl()}/track/${trackingToken}`
   });
 });
 
