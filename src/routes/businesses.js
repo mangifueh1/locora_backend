@@ -214,10 +214,21 @@ router.post('/reset-password', async (req, res, next) => {
 
 // --- Dashboard-only routes below, all behind businessSessionAuth ---
 
+// Return the authenticated business's public profile details.
+router.get('/me', businessSessionAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, name, email, email_verified, webhook_url, created_at
+     FROM businesses
+     WHERE id = $1`,
+    [req.business.id]
+  );
+  res.json({ business: rows[0] });
+});
+
 // List this business's drivers.
 router.get('/me/drivers', businessSessionAuth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT dr.id, dr.name, dr.phone, db.created_at AS joined_at
+    `SELECT dr.id, dr.name, dr.phone, dr.load, db.created_at AS joined_at
      FROM driver_businesses db
      JOIN drivers dr ON dr.id = db.driver_id
      WHERE db.business_id = $1
@@ -244,8 +255,18 @@ router.get('/me/deliveries', businessSessionAuth, async (req, res) => {
   const status = req.query.status; // optional: ?status=pending
   const { rows } = await pool.query(
     status
-      ? `SELECT * FROM deliveries WHERE business_id = $1 AND status = $2 ORDER BY created_at DESC`
-      : `SELECT * FROM deliveries WHERE business_id = $1 ORDER BY created_at DESC`,
+      ? `SELECT d.*, c.address_description, c.phone AS customer_phone,
+                dr.name AS driver_name, dr.phone AS driver_phone
+     FROM deliveries d
+     LEFT JOIN customers c ON c.id = d.customer_id
+     LEFT JOIN drivers dr ON dr.id = d.driver_id
+     WHERE d.business_id = $1 AND d.status = $2 ORDER BY d.created_at DESC`
+      : `SELECT d.*, c.address_description, c.phone AS customer_phone,
+                dr.name AS driver_name, dr.phone AS driver_phone
+     FROM deliveries d
+     LEFT JOIN customers c ON c.id = d.customer_id
+     LEFT JOIN drivers dr ON dr.id = d.driver_id
+     WHERE d.business_id = $1 ORDER BY d.created_at DESC`,
     status ? [req.business.id, status] : [req.business.id]
   );
   res.json({ deliveries: rows });
