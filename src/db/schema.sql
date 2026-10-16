@@ -21,6 +21,7 @@ CREATE TABLE customers (
   phone TEXT UNIQUE NOT NULL,          -- E.164 normalized, e.g. +237670000000
   lat DOUBLE PRECISION,
   lng DOUBLE PRECISION,
+  address_description TEXT,
   updated_at TIMESTAMPTZ DEFAULT now(),
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -41,6 +42,7 @@ CREATE TABLE drivers (
   name TEXT NOT NULL,
   phone TEXT UNIQUE NOT NULL,          -- E.164 normalized; also the login identifier
   password_hash TEXT NOT NULL,
+  load SMALLINT NOT NULL DEFAULT 0 CHECK (load BETWEEN 0 AND 255),
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

@@ -1,9 +1,9 @@
 ## Delivery flow
 
 When a business creates a delivery with `POST /api/v1/deliveries`, the response
-always includes a `tracking_link`. If the customer has no saved location, the
-response also includes a short-lived `picker_url`; the tracking link remains the
-same after the customer submits their location.
+always includes a `tracking_link` and a short-lived `picker_url`. The picker
+offers a saved location when available, and the customer must confirm the saved
+location or choose a new one before drivers can claim the delivery.
 
 The public tracking page reads the tracking token with:
 
@@ -231,8 +231,8 @@ Then use Postman or your frontend to verify, in order:
 2. Log in and confirm the returned JWT can authenticate a protected route.
 3. Create a delivery through `POST /api/v1/deliveries` using the returned API
    key.
-4. Confirm its `tracking_link` and, when needed, `picker_url` use the expected
-   frontend origin for the current `NODE_ENV`.
+4. Confirm its `tracking_link` and `picker_url` use the expected frontend
+   origin for the current `NODE_ENV`.
 5. Open the public tracking endpoint from the returned token:
    `GET /api/v1/deliveries/by-token/:token`.
 6. Connect the frontend Socket.IO client to the backend origin and verify

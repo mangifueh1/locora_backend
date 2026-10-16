@@ -40,7 +40,7 @@ router.post('/register', async (req, res, next) => {
 
     const { rows: driverRows } = await client.query(
       `INSERT INTO drivers (name, phone, password_hash)
-       VALUES ($1, $2, $3) RETURNING id, name, phone, created_at`,
+       VALUES ($1, $2, $3) RETURNING id, name, phone, load, created_at`,
       [name, normalizedPhone, passwordHash]
     );
     const driver = driverRows[0];
@@ -83,9 +83,22 @@ router.post('/login', async (req, res, next) => {
 
   const token = signToken({ driverId: driver.id, type: 'driver' }, '7d');
   res.json({
-    driver: { id: driver.id, name: driver.name, phone: driver.phone },
+    driver: { id: driver.id, name: driver.name, phone: driver.phone, load: driver.load },
     token
   });
+});
+
+router.patch('/me/load', driverAuth, async (req, res, next) => {
+  const { load } = req.body;
+  if (!Number.isInteger(load) || load < 0 || load > 255) {
+    return next(new AppResponse('load must be an integer between 0 and 255', 400));
+  }
+
+  const { rows } = await pool.query(
+    'UPDATE drivers SET load = $1 WHERE id = $2 RETURNING id, load',
+    [load, req.driver.id]
+  );
+  res.json({ driver: rows[0] });
 });
 
 // Deliveries this driver can claim from businesses they belong to.
@@ -97,11 +110,14 @@ router.get('/me/available-deliveries', driverAuth, async (req, res) => {
   );
   const { rows } = await pool.query(
     `SELECT d.id, d.order_id, d.status, d.customer_lat, d.customer_lng,
+            c.address_description,
             b.id AS business_id, b.name AS business_name, d.created_at
      FROM deliveries d
+     LEFT JOIN customers c ON c.id = d.customer_id
      JOIN driver_businesses db ON db.business_id = d.business_id
      JOIN businesses b ON b.id = d.business_id
      WHERE db.driver_id = $1 AND d.status = 'pending' AND d.driver_id IS NULL
+       AND d.customer_lat IS NOT NULL AND d.customer_lng IS NOT NULL
      ORDER BY d.created_at ASC`,
     [req.driver.id]
   );
@@ -116,9 +132,10 @@ router.get('/me/available-deliveries', driverAuth, async (req, res) => {
 router.get('/me/deliveries', driverAuth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT d.id, d.order_id, d.status, d.customer_lat, d.customer_lng,
-            d.driver_lat, d.driver_lng,
+           d.driver_lat, d.driver_lng, c.address_description,
             b.name AS business_name, d.created_at
      FROM deliveries d
+         LEFT JOIN customers c ON c.id = d.customer_id
      JOIN businesses b ON b.id = d.business_id
      WHERE d.driver_id = $1
      ORDER BY d.created_at DESC`,
